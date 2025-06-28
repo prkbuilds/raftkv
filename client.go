@@ -98,6 +98,7 @@ func runTest(duration int) {
 				}
 			}
 		}
+		time.Sleep(200 * time.Millisecond)
 
 		total++
 		if ok {
@@ -126,7 +127,7 @@ func runTest(duration int) {
 		accuracy := float64(verified) / float64(success) * 100
 		log.Printf("[Test] Uptime: %.2f%% (%d/%d), Verified: %.2f%% (%d/%d)", uptime, success, total, accuracy, verified, success)
 
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	log.Printf("Test completed.\nTotal requests: %d\nSuccessful: %d\nVerified: %d\nUptime: %.2f%%\nCorrectness: %.2f%%",
