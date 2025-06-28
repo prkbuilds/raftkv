@@ -10,7 +10,8 @@ import (
 )
 
 type RaftNode struct {
-	mu          sync.Mutex
+	mu sync.Mutex
+
 	id          int
 	peers       []string
 	clients     []pb.RaftClient
@@ -22,9 +23,8 @@ type RaftNode struct {
 	commitIndex int
 	lastApplied int
 
-	nextIndex      []int
-	matchIndex     []int
-	pendingCommits map[int]chan bool
+	nextIndex  []int
+	matchIndex []int
 
 	electionTimer *time.Timer
 	heartbeatCh   chan bool
@@ -44,21 +44,21 @@ func NewRaftNode(id int, peers []string, applyCh chan ApplyMsg) *RaftNode {
 	}
 
 	rn := &RaftNode{
-		id:             id,
-		peers:          peers,
-		clients:        clients,
-		state:          Follower,
-		log:            make([]LogEntry, 0),
-		votedFor:       nil,
-		pendingCommits: make(map[int]chan bool),
-		applyCh:        applyCh,
-		heartbeatCh:    make(chan bool, 1),
-		kvStore:        make(map[string]string),
+		id:          id,
+		peers:       peers,
+		clients:     clients,
+		state:       Follower,
+		votedFor:    nil,
+		log:         make([]LogEntry, 0),
+		commitIndex: -1,
+		lastApplied: -1,
+		heartbeatCh: make(chan bool, 1),
+		applyCh:     applyCh,
+		kvStore:     make(map[string]string),
 	}
 
 	rn.resetElectionTimer()
 	go rn.runElectionTimer()
-	go rn.applyCommittedLogs()
 	go rn.runApplier()
 	return rn
 }

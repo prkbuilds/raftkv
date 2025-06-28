@@ -71,11 +71,14 @@ func runTest(duration int) {
 	log.Printf("Starting Raft KV Test for %d seconds...\n", duration)
 	total := 0
 	success := 0
+	verified := 0
 	leaderAddr := ""
 	start := time.Now()
 
 	for i := 0; time.Since(start) < time.Duration(duration)*time.Second; i++ {
-		cmd := fmt.Sprintf("set key%d=value%d", i, i)
+		key := fmt.Sprintf("key%d", i)
+		value := fmt.Sprintf("value%d", i)
+		cmd := fmt.Sprintf("set %s=%s", key, value)
 		ok := false
 
 		if leaderAddr != "" {
@@ -99,18 +102,37 @@ func runTest(duration int) {
 		total++
 		if ok {
 			success++
+
+			// Attempt to get the key and verify the value
+			gotValue := ""
+			for _, addr := range nodeAddrs {
+				val, found := tryGetCommand(addr, key)
+				if found {
+					gotValue = val
+					break
+				}
+			}
+
+			if gotValue == value {
+				verified++
+			} else {
+				log.Printf("Verification failed for %s: expected=%s, got=%s", key, value, gotValue)
+			}
 		} else {
 			log.Printf("Failed to send command: %s", cmd)
 		}
 
 		uptime := float64(success) / float64(total) * 100
-		log.Printf("[Test] Uptime: %.2f%% (%d/%d)", uptime, success, total)
+		accuracy := float64(verified) / float64(success) * 100
+		log.Printf("[Test] Uptime: %.2f%% (%d/%d), Verified: %.2f%% (%d/%d)", uptime, success, total, accuracy, verified, success)
 
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	log.Printf("Test completed.\nTotal requests: %d\nSuccessful: %d\nUptime: %.2f%%",
-		total, success, float64(success)/float64(total)*100)
+	log.Printf("Test completed.\nTotal requests: %d\nSuccessful: %d\nVerified: %d\nUptime: %.2f%%\nCorrectness: %.2f%%",
+		total, success, verified,
+		float64(success)/float64(total)*100,
+		float64(verified)/float64(success)*100)
 }
 
 func runInteractive() {

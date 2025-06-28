@@ -22,7 +22,9 @@ func (rn *RaftNode) startElection() {
 
 	log.Printf("Node %d started election in term %d", rn.id, currentTerm)
 
+	timeout := time.After(300 * time.Millisecond)
 	votes := 1
+	votesNeeded := len(rn.peers)/2 + 1
 	votesCh := make(chan bool, len(rn.peers)-1)
 
 	for i := range rn.peers {
@@ -44,8 +46,16 @@ func (rn *RaftNode) startElection() {
 	}
 
 	for i := 0; i < len(rn.peers)-1; i++ {
-		if <-votesCh {
-			votes++
+		select {
+		case granted := <-votesCh:
+			if granted {
+				votes++
+				if votes >= votesNeeded {
+					i = len(rn.peers) - 1
+				}
+			}
+		case <-timeout:
+			break
 		}
 	}
 
@@ -73,7 +83,15 @@ func (rn *RaftNode) resetElectionTimer() {
 	if rn.electionTimer != nil {
 		rn.electionTimer.Stop()
 	}
-	timeout := time.Duration(500+rand.Intn(200)) * time.Millisecond
+	var baseTimeout time.Duration
+	if rn.id == 2 {
+		// Node 2 will time out sooner
+		baseTimeout = 150 * time.Millisecond
+	} else {
+		// Delay others
+		baseTimeout = 500 * time.Millisecond
+	}
+	timeout := baseTimeout + time.Duration(rand.Intn(200))*time.Millisecond
 	rn.electionTimer = time.NewTimer(timeout)
 }
 

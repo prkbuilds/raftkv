@@ -20,7 +20,6 @@ type RaftService struct {
 
 func (rs *RaftService) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, error) {
 	index, term, isLeader := rs.raftNode.Set(req.Command)
-	log.Printf("Received StartCommand RPC with command: %q", req.Command)
 	return &pb.SetResponse{
 		Index:    int32(index),
 		Term:     int32(term),
@@ -91,8 +90,16 @@ func main() {
 		log.Fatalf("Invalid node ID %d. Must be in range 0 to %d", *id, len(peers)-1)
 	}
 
-	applyCh := make(chan raft.ApplyMsg)
+	applyCh := make(chan raft.ApplyMsg, 100)
 	node := raft.NewRaftNode(*id, peers, applyCh)
+
+	go func() {
+		for msg := range applyCh {
+			if msg.CommandValid {
+				// log.Printf("Node %d: applied command at index %d: %v", *id, msg.CommandIndex, msg.Command)
+			}
+		}
+	}()
 
 	grpcServer := grpc.NewServer()
 	reflection.Register(grpcServer)

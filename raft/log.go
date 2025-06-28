@@ -3,7 +3,6 @@ package raft
 import (
 	"context"
 	"fmt"
-	"log"
 	"slices"
 	"sort"
 	"time"
@@ -66,7 +65,6 @@ func (rn *RaftNode) sendAppendEntries(peer string, args *AppendEntriesArgs, repl
 
 	entries := []*pb.LogEntry{}
 	for _, e := range args.Entries {
-		log.Printf("Sending log entry: %v", e)
 		entries = append(entries, &pb.LogEntry{
 			Term:    int32(e.Term),
 			Command: fmt.Sprintf("%v", e.Command),
@@ -123,13 +121,11 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs, reply *AppendEn
 	for i, entry := range args.Entries {
 		if index < len(rn.log) {
 			if rn.log[index].Term != entry.Term {
-				log.Printf("Adding entries: %v", args.Entries[i:])
 				rn.log = rn.log[:index]
 				rn.log = append(rn.log, args.Entries[i:]...)
 				break
 			}
 		} else {
-			log.Printf("Adding entries: %v", args.Entries[i:])
 			rn.log = append(rn.log, args.Entries[i:]...)
 			break
 		}
@@ -148,18 +144,12 @@ func (rn *RaftNode) updateCommitIndex() {
 	matchIndexes := slices.Clone(rn.matchIndex)
 	matchIndexes[rn.id] = rn.lastLogIndex()
 	sort.Ints(matchIndexes)
-	N := matchIndexes[len(rn.peers)/2]
+
+	quorumIndex := len(matchIndexes) - (len(matchIndexes)/2 + 1)
+	N := matchIndexes[quorumIndex]
 
 	if N > rn.commitIndex && rn.log[N].Term == rn.currentTerm {
-		log.Printf("Leader %d: committing log at index %d (term %d)", rn.id, N, rn.currentTerm)
 		rn.commitIndex = N
-
-		for i := rn.lastApplied + 1; i <= rn.commitIndex; i++ {
-			if ch, ok := rn.pendingCommits[i]; ok {
-				ch <- true
-				delete(rn.pendingCommits, i)
-			}
-		}
 	}
 }
 

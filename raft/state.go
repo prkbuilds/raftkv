@@ -6,19 +6,6 @@ import (
 	"time"
 )
 
-func (rn *RaftNode) applyCommittedLogs() {
-	for {
-		rn.mu.Lock()
-		for rn.lastApplied < rn.commitIndex {
-			rn.lastApplied++
-			index := rn.lastApplied
-			rn.applyLog(index)
-		}
-		rn.mu.Unlock()
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
 func (rn *RaftNode) applyLog(index int) {
 	if index >= len(rn.log) {
 		return
@@ -36,8 +23,19 @@ func (rn *RaftNode) applyLog(index int) {
 			key := kv[0]
 			value := kv[1]
 			rn.kvStore[key] = value
-			log.Printf("Node %d: applied command at index %d -> %s=%s", rn.id, index, key, value)
 		}
+	}
+
+	msg := ApplyMsg{
+		CommandValid: true,
+		Command:      entry.Command,
+		CommandIndex: index,
+	}
+
+	select {
+	case rn.applyCh <- msg:
+	default:
+		log.Printf("Node %d: applyCh is full, dropping apply message for index %d", rn.id, index)
 	}
 }
 
@@ -46,15 +44,10 @@ func (rn *RaftNode) runApplier() {
 		time.Sleep(10 * time.Millisecond)
 		rn.mu.Lock()
 		for rn.lastApplied < rn.commitIndex {
-			rn.lastApplied++
-			msg := ApplyMsg{
-				CommandValid: true,
-				Command:      rn.log[rn.lastApplied].Command,
-				CommandIndex: rn.lastApplied,
-			}
+			nextIndex := rn.lastApplied + 1
+			rn.lastApplied = nextIndex
 			rn.mu.Unlock()
-			log.Printf("Node %d: applied command at index %d -> %v", rn.id, msg.CommandIndex, msg.Command)
-			rn.applyCh <- msg
+			rn.applyLog(rn.lastApplied)
 			rn.mu.Lock()
 		}
 		rn.mu.Unlock()

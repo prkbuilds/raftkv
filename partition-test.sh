@@ -19,7 +19,7 @@ echo
 echo "Simulating network partition: disconnecting $PARTITION_NODE from $NETWORK_NAME"
 docker network disconnect "$NETWORK_NAME" "$PARTITION_NODE"
 
-sleep 10
+sleep 20
 
 echo
 echo "Reconnecting $PARTITION_NODE to $NETWORK_NAME"
