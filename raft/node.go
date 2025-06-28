@@ -112,7 +112,7 @@ func (rn *RaftNode) peerIndex(peer string) int {
 			return i
 		}
 	}
-	return -1 // or handle error as appropriate
+	return -1
 }
 
 func (rn *RaftNode) Start(command interface{}) (int, int, bool) {
@@ -120,15 +120,11 @@ func (rn *RaftNode) Start(command interface{}) (int, int, bool) {
 	defer rn.mu.Unlock()
 
 	if rn.state != Leader {
-		log.Printf("Rejecting commnad, node %d is not leader", rn.id)
+		log.Printf("Rejecting command, node %d is not leader", rn.id)
 		return -1, rn.currentTerm, false
 	}
 
-	entry := LogEntry{
-		Term:    rn.currentTerm,
-		Command: command,
-	}
-
+	entry := LogEntry{Term: rn.currentTerm, Command: command}
 	rn.log = append(rn.log, entry)
 	index := len(rn.log) - 1
 	term := rn.currentTerm
@@ -155,11 +151,9 @@ func (rn *RaftNode) runElectionTimer() {
 
 		select {
 		case <-rn.electionTimer.C:
-			rn.mu.Lock()
 			if state != Leader {
-				rn.startElection()
+				go rn.startElection()
 			}
-			rn.mu.Unlock()
 		case <-rn.heartbeatCh:
 			rn.resetElectionTimer()
 		}
@@ -207,56 +201,52 @@ func (rn *RaftNode) startElection() {
 	rn.resetElectionTimer()
 	rn.mu.Unlock()
 
-	log.Printf("Node %d started election in term %d", rn.id, rn.currentTerm)
+	log.Printf("Node %d started election in term %d", rn.id, currentTerm)
 
 	votes := 1
-	var wg sync.WaitGroup
+	votesCh := make(chan bool, len(rn.peers)-1)
 
-	for _, peer := range rn.peers {
-		if peer == rn.peers[rn.id] {
+	for i := range rn.peers {
+		if i == rn.id {
 			continue
 		}
 
-		wg.Add(1)
-		go func(peer string) {
-			defer wg.Done()
-
+		go func(i int) {
 			args := RequestVoteArgs{
 				Term:         currentTerm,
 				CandidateId:  rn.id,
 				LastLogIndex: lastLogIndex,
 				LastLogTerm:  lastLogTerm,
 			}
-
 			var reply RequestVoteReply
-			ok := rn.sendRequestVote(peer, &args, &reply)
-			if ok {
-				rn.mu.Lock()
-				defer rn.mu.Unlock()
-				if reply.VoteGranted {
-					votes++
-					if votes > len(rn.peers)/2 && rn.state == Candidate {
-						rn.state = Leader
-						rn.nextIndex = make([]int, len(rn.peers))
-						rn.matchIndex = make([]int, len(rn.peers))
-						for i := range rn.peers {
-							rn.nextIndex[i] = rn.lastLogIndex() + 1
-							rn.matchIndex[i] = 0
-						}
-						log.Printf("Node %d became Leader in term %d", rn.id, rn.currentTerm)
-						rn.replicateLog()
-					}
-				} else if reply.Term > rn.currentTerm {
-					rn.currentTerm = reply.Term
-					rn.state = Follower
-					rn.votedFor = nil
-					rn.resetElectionTimer()
-				}
-			}
-		}(peer)
+			ok := rn.sendRequestVote(rn.peers[i], &args, &reply)
+			votesCh <- ok && reply.VoteGranted
+		}(i)
 	}
 
-	wg.Wait()
+	for i := 0; i < len(rn.peers)-1; i++ {
+		if <-votesCh {
+			votes++
+		}
+	}
+
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	if rn.state == Candidate && votes > len(rn.peers)/2 {
+		rn.becomeLeader()
+	}
+}
+
+func (rn *RaftNode) becomeLeader() {
+	rn.state = Leader
+	rn.nextIndex = make([]int, len(rn.peers))
+	rn.matchIndex = make([]int, len(rn.peers))
+	for i := range rn.peers {
+		rn.nextIndex[i] = rn.lastLogIndex() + 1
+		rn.matchIndex[i] = 0
+	}
+	log.Printf("Node %d became Leader in term %d", rn.id, rn.currentTerm)
+	rn.replicateLog()
 }
 
 func (rn *RaftNode) replicateLog() {
@@ -299,7 +289,7 @@ func (rn *RaftNode) replicateLog() {
 					rn.votedFor = nil
 					rn.resetElectionTimer()
 				} else {
-					rn.nextIndex[i]-- // decrement and retry
+					rn.nextIndex[i]--
 				}
 			}
 		}(i, peer)
@@ -318,6 +308,10 @@ func (rn *RaftNode) updateCommitIndex() {
 
 func (rn *RaftNode) sendAppendEntries(peer string, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	i := rn.peerIndex(peer)
+	if i == -1 {
+		return false
+	}
+
 	entries := []*pb.LogEntry{}
 	for _, e := range args.Entries {
 		entries = append(entries, &pb.LogEntry{
@@ -347,6 +341,10 @@ func (rn *RaftNode) sendAppendEntries(peer string, args *AppendEntriesArgs, repl
 
 func (rn *RaftNode) sendRequestVote(peer string, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	i := rn.peerIndex(peer)
+	if i == -1 {
+		return false
+	}
+
 	req := &pb.RequestVoteArgs{
 		Term:         int32(args.Term),
 		CandidateId:  int32(args.CandidateId),
@@ -421,7 +419,6 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs, reply *AppendEn
 		return
 	}
 
-	// Append any new entries
 	index := args.PrevLogIndex + 1
 	for i, entry := range args.Entries {
 		if index < len(rn.log) {

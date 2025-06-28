@@ -10,6 +10,7 @@ import (
 	pb "github.com/prkbuilds/raft-kv/proto/raftpb"
 	"github.com/prkbuilds/raft-kv/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 type RaftService struct {
@@ -86,6 +87,7 @@ func main() {
 	node := raft.NewRaftNode(*id, peers, applyCh)
 
 	grpcServer := grpc.NewServer()
+	reflection.Register(grpcServer)
 	pb.RegisterRaftServer(grpcServer, &RaftService{raftNode: node})
 
 	address := fmt.Sprintf(":%d", *port)
