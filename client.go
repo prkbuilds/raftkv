@@ -1,58 +1,176 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	pb "github.com/prkbuilds/raft-kv/proto/raftpb"
 	"google.golang.org/grpc"
 )
 
-func main() {
-	// List of Raft server addresses (same as your Docker Compose ports)
-	servers := []string{
-		"localhost:50051",
-		"localhost:50052",
-		"localhost:50053",
+var nodeAddrs = []string{":50051", ":50052", ":50053"}
+
+func trySetCommand(addr, command string) bool {
+	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	if err != nil {
+		log.Printf("Failed to connect to %s: %v", addr, err)
+		return false
+	}
+	defer conn.Close()
+
+	client := pb.NewRaftClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req := &pb.SetRequest{Command: command}
+	res, err := client.Set(ctx, req)
+	if err != nil {
+		log.Printf("RPC error from %s: %v", addr, err)
+		return false
 	}
 
-	var client pb.RaftClient
-	var conn *grpc.ClientConn
-	var err error
+	if res.IsLeader {
+		fmt.Printf("Leader at %s accepted command. Index: %d, Term: %d\n", addr, res.Index, res.Term)
+		return true
+	}
+	return false
+}
 
-	// Try to find the leader by sending StartCommand RPC until one accepts (isLeader == true)
-	for _, addr := range servers {
-		conn, err = grpc.Dial(addr, grpc.WithInsecure())
-		if err != nil {
-			log.Printf("Failed to connect to %s: %v", addr, err)
-			continue
+func tryGetCommand(addr, key string) (string, bool) {
+	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	if err != nil {
+		log.Printf("Failed to connect to %s: %v", addr, err)
+		return "", false
+	}
+	defer conn.Close()
+
+	client := pb.NewRaftClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req := &pb.GetRequest{Key: key}
+	res, err := client.Get(ctx, req)
+	if err != nil {
+		log.Printf("RPC error from %s: %v", addr, err)
+		return "", false
+	}
+
+	if res.Found {
+		return res.Value, true
+	}
+	return "(not found)", true
+}
+
+func runTest(duration int) {
+	log.Printf("Starting Raft KV Test for %d seconds...\n", duration)
+	total := 0
+	success := 0
+	leaderAddr := ""
+	start := time.Now()
+
+	for i := 0; time.Since(start) < time.Duration(duration)*time.Second; i++ {
+		cmd := fmt.Sprintf("set key%d=value%d", i, i)
+		ok := false
+
+		if leaderAddr != "" {
+			ok = trySetCommand(leaderAddr, cmd)
+			if !ok {
+				leaderAddr = ""
+			}
 		}
-		defer conn.Close()
 
-		client = pb.NewRaftClient(conn)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		req := &pb.StartCommandRequest{
-			Command: "set x=42",
+		if leaderAddr == "" {
+			for _, addr := range nodeAddrs {
+				if trySetCommand(addr, cmd) {
+					log.Printf("Leader at %s accepted command: %s", addr, cmd)
+					leaderAddr = addr
+					ok = true
+					break
+				}
+			}
 		}
 
-		resp, err := client.StartCommand(ctx, req)
-		if err != nil {
-			log.Printf("Error calling StartCommand on %s: %v", addr, err)
-			continue
-		}
-
-		if resp.IsLeader {
-			fmt.Printf("Leader is at %s, command appended at index %d term %d\n", addr, resp.Index, resp.Term)
-			return
+		total++
+		if ok {
+			success++
 		} else {
-			log.Printf("Node %s is not leader", addr)
+			log.Printf("Failed to send command: %s", cmd)
 		}
+
+		uptime := float64(success) / float64(total) * 100
+		log.Printf("[Test] Uptime: %.2f%% (%d/%d)", uptime, success, total)
+
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	log.Println("No leader found or no node accepted the command")
+	log.Printf("Test completed.\nTotal requests: %d\nSuccessful: %d\nUptime: %.2f%%",
+		total, success, float64(success)/float64(total)*100)
+}
+
+func runInteractive() {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("Raft KV Client (Interactive)")
+	fmt.Println("Commands:")
+	fmt.Println("  set <key>=<value>")
+	fmt.Println("  get <key>")
+	fmt.Println("Type 'exit' to quit")
+
+	for {
+		fmt.Print("> ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		if input == "exit" {
+			break
+		}
+
+		if strings.HasPrefix(input, "get ") {
+			key := strings.TrimSpace(strings.TrimPrefix(input, "get "))
+			sent := false
+			for _, addr := range nodeAddrs {
+				value, ok := tryGetCommand(addr, key)
+				if ok {
+					fmt.Printf("Response from %s: %s = %s\n", addr, key, value)
+					sent = true
+					break
+				}
+			}
+			if !sent {
+				fmt.Println("Failed to get key from any node.")
+			}
+			continue
+		}
+
+		sent := false
+		for _, addr := range nodeAddrs {
+			if trySetCommand(addr, input) {
+				sent = true
+				break
+			}
+		}
+		if !sent {
+			fmt.Println("Failed to send command to any leader. Try again.")
+		}
+	}
+}
+
+func main() {
+	mode := flag.String("mode", "test", "Mode to run the program in. Options: interactive, test")
+	testDuration := flag.Int("duration", 300, "Duration to run the test for in seconds. Only used when mode is test.")
+
+	switch *mode {
+	case "interactive":
+		runInteractive()
+	case "test":
+		runTest(*testDuration)
+	default:
+		log.Fatalf("Unknown mode: %s", *mode)
+	}
 }

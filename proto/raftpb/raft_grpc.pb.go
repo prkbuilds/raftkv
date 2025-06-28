@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Raft_StartCommand_FullMethodName  = "/raft.Raft/StartCommand"
+	Raft_Set_FullMethodName           = "/raft.Raft/Set"
+	Raft_Get_FullMethodName           = "/raft.Raft/Get"
 	Raft_RequestVote_FullMethodName   = "/raft.Raft/RequestVote"
 	Raft_AppendEntries_FullMethodName = "/raft.Raft/AppendEntries"
 )
@@ -28,7 +29,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RaftClient interface {
-	StartCommand(ctx context.Context, in *StartCommandRequest, opts ...grpc.CallOption) (*StartCommandResponse, error)
+	Set(ctx context.Context, in *SetRequest, opts ...grpc.CallOption) (*SetResponse, error)
+	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 	RequestVote(ctx context.Context, in *RequestVoteArgs, opts ...grpc.CallOption) (*RequestVoteReply, error)
 	AppendEntries(ctx context.Context, in *AppendEntriesArgs, opts ...grpc.CallOption) (*AppendEntriesReply, error)
 }
@@ -41,10 +43,20 @@ func NewRaftClient(cc grpc.ClientConnInterface) RaftClient {
 	return &raftClient{cc}
 }
 
-func (c *raftClient) StartCommand(ctx context.Context, in *StartCommandRequest, opts ...grpc.CallOption) (*StartCommandResponse, error) {
+func (c *raftClient) Set(ctx context.Context, in *SetRequest, opts ...grpc.CallOption) (*SetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StartCommandResponse)
-	err := c.cc.Invoke(ctx, Raft_StartCommand_FullMethodName, in, out, cOpts...)
+	out := new(SetResponse)
+	err := c.cc.Invoke(ctx, Raft_Set_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetResponse)
+	err := c.cc.Invoke(ctx, Raft_Get_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +87,8 @@ func (c *raftClient) AppendEntries(ctx context.Context, in *AppendEntriesArgs, o
 // All implementations must embed UnimplementedRaftServer
 // for forward compatibility.
 type RaftServer interface {
-	StartCommand(context.Context, *StartCommandRequest) (*StartCommandResponse, error)
+	Set(context.Context, *SetRequest) (*SetResponse, error)
+	Get(context.Context, *GetRequest) (*GetResponse, error)
 	RequestVote(context.Context, *RequestVoteArgs) (*RequestVoteReply, error)
 	AppendEntries(context.Context, *AppendEntriesArgs) (*AppendEntriesReply, error)
 	mustEmbedUnimplementedRaftServer()
@@ -88,8 +101,11 @@ type RaftServer interface {
 // pointer dereference when methods are called.
 type UnimplementedRaftServer struct{}
 
-func (UnimplementedRaftServer) StartCommand(context.Context, *StartCommandRequest) (*StartCommandResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method StartCommand not implemented")
+func (UnimplementedRaftServer) Set(context.Context, *SetRequest) (*SetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Set not implemented")
+}
+func (UnimplementedRaftServer) Get(context.Context, *GetRequest) (*GetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
 }
 func (UnimplementedRaftServer) RequestVote(context.Context, *RequestVoteArgs) (*RequestVoteReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestVote not implemented")
@@ -118,20 +134,38 @@ func RegisterRaftServer(s grpc.ServiceRegistrar, srv RaftServer) {
 	s.RegisterService(&Raft_ServiceDesc, srv)
 }
 
-func _Raft_StartCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StartCommandRequest)
+func _Raft_Set_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RaftServer).StartCommand(ctx, in)
+		return srv.(RaftServer).Set(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Raft_StartCommand_FullMethodName,
+		FullMethod: Raft_Set_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RaftServer).StartCommand(ctx, req.(*StartCommandRequest))
+		return srv.(RaftServer).Set(ctx, req.(*SetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Raft_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServer).Get(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Raft_Get_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServer).Get(ctx, req.(*GetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -180,8 +214,12 @@ var Raft_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*RaftServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "StartCommand",
-			Handler:    _Raft_StartCommand_Handler,
+			MethodName: "Set",
+			Handler:    _Raft_Set_Handler,
+		},
+		{
+			MethodName: "Get",
+			Handler:    _Raft_Get_Handler,
 		},
 		{
 			MethodName: "RequestVote",

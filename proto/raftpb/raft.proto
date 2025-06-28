@@ -5,19 +5,29 @@ package raft;
 option go_package = "github.com/prkbuilds/raft-kv/proto/raftpb";
 
 service Raft {
-  rpc StartCommand(StartCommandRequest) returns (StartCommandResponse);
+  rpc Set(SetRequest) returns (SetResponse);
+  rpc Get(GetRequest) returns (GetResponse);
   rpc RequestVote(RequestVoteArgs) returns (RequestVoteReply);
   rpc AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply);
 }
 
-message StartCommandRequest {
+message SetRequest {
   string command = 1;
 }
 
-message StartCommandResponse {
+message SetResponse {
   int32 index = 1;
   int32 term = 2;
   bool isLeader = 3;
+}
+
+message GetRequest {
+  string key = 1;
+}
+
+message GetResponse {
+  string value = 1;
+  bool found = 2;
 }
 
 message LogEntry {

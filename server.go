@@ -18,13 +18,21 @@ type RaftService struct {
 	raftNode *raft.RaftNode
 }
 
-func (rs *RaftService) StartCommand(ctx context.Context, req *pb.StartCommandRequest) (*pb.StartCommandResponse, error) {
-	index, term, isLeader := rs.raftNode.Start(req.Command)
+func (rs *RaftService) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, error) {
+	index, term, isLeader := rs.raftNode.Set(req.Command)
 	log.Printf("Received StartCommand RPC with command: %q", req.Command)
-	return &pb.StartCommandResponse{
+	return &pb.SetResponse{
 		Index:    int32(index),
 		Term:     int32(term),
 		IsLeader: isLeader,
+	}, nil
+}
+
+func (rs *RaftService) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
+	val, found := rs.raftNode.Get(req.Key)
+	return &pb.GetResponse{
+		Value: val,
+		Found: found,
 	}, nil
 }
 
