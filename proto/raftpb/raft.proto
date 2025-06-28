@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package raft;
+
+option go_package = "github.com/prkbuilds/raft-kv/proto/raftpb";
+
+// The Raft service definition
+service Raft {
+  // Called by clients to start a command
+  rpc StartCommand(StartCommandRequest) returns (StartCommandResponse);
+
+  // Called by leaders to replicate log entries
+  rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+}
+
+// Message to request starting a command (client -> leader)
+message StartCommandRequest {
+  string command = 1;
+}
+
+// Message returned by StartCommand
+message StartCommandResponse {
+  int32 index = 1;
+  int32 term = 2;
+  bool isLeader = 3;
+}
+
+// Represents a single log entry
+message LogEntry {
+  int32 term = 1;
+  string command = 2; // Assuming command is a string; change to `bytes` if needed
+}
+
+// Message for AppendEntries RPC (leader -> follower)
+message AppendEntriesRequest {
+  int32 term = 1;
+  int32 leaderId = 2;
+  int32 prevLogIndex = 3;
+  int32 prevLogTerm = 4;
+  repeated LogEntry entries = 5;
+  int32 leaderCommit = 6;
+}
+
+// Message returned by AppendEntries
+message AppendEntriesResponse {
+  int32 term = 1;
+  bool success = 2;
+}
+
