@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  node0:
+    build: .
+    ports:
+      - "50051:50051"
+    environment:
+      - NODE_ID=0
+    command: ["./raft-server", "--id=0", "--port=50051"]
+
+  node1:
+    build: .
+    ports:
+      - "50052:50052"
+    environment:
+      - NODE_ID=1
+    command: ["./raft-server", "--id=1", "--port=50052"]
+
+  node2:
+    build: .
+    ports:
+      - "50053:50053"
+    environment:
+      - NODE_ID=2
+    command: ["./raft-server", "--id=2", "--port=50053"]
+

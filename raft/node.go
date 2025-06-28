@@ -62,6 +62,7 @@ type RaftNode struct {
 	mu          sync.Mutex
 	id          int
 	peers       []string
+	clients     []pb.RaftClient
 	state       State
 	currentTerm int
 	votedFor    *int
@@ -79,19 +80,39 @@ type RaftNode struct {
 }
 
 func NewRaftNode(id int, peers []string, applyCh chan ApplyMsg) *RaftNode {
+	clients := make([]pb.RaftClient, 0)
+	for _, addr := range peers {
+		conn, err := grpc.Dial(addr, grpc.WithInsecure())
+		if err != nil {
+			log.Fatalf("Failed to connect to %s: %v", addr, err)
+		}
+		clients = append(clients, pb.NewRaftClient(conn))
+	}
+
 	rn := &RaftNode{
 		id:          id,
 		peers:       peers,
+		clients:     clients,
 		state:       Follower,
-		log:         make([]LogEntry, 1),
+		log:         make([]LogEntry, 0),
 		votedFor:    nil,
 		applyCh:     applyCh,
 		heartbeatCh: make(chan bool, 1),
 	}
+
 	rn.resetElectionTimer()
 	go rn.runElectionTimer()
 	go rn.runApplier()
 	return rn
+}
+
+func (rn *RaftNode) peerIndex(peer string) int {
+	for i, p := range rn.peers {
+		if p == peer {
+			return i
+		}
+	}
+	return -1 // or handle error as appropriate
 }
 
 func (rn *RaftNode) Start(command interface{}) (int, int, bool) {
@@ -296,49 +317,51 @@ func (rn *RaftNode) updateCommitIndex() {
 }
 
 func (rn *RaftNode) sendAppendEntries(peer string, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	conn, err := grpc.Dial(peer, grpc.WithInsecure(), grpc.WithTimeout(1*time.Second))
-	if err != nil {
-		return false
+	i := rn.peerIndex(peer)
+	entries := []*pb.LogEntry{}
+	for _, e := range args.Entries {
+		entries = append(entries, &pb.LogEntry{
+			Term:    int32(e.Term),
+			Command: fmt.Sprintf("%v", e.Command),
+		})
 	}
-	defer conn.Close()
 
-	client := pb.NewRaftClient(conn)
-
-	// convert args -> pb.AppendEntriesRequest
-	req := &pb.AppendEntriesRequest{
+	req := &pb.AppendEntriesArgs{
 		Term:         int32(args.Term),
 		LeaderId:     int32(args.LeaderId),
 		PrevLogIndex: int32(args.PrevLogIndex),
 		PrevLogTerm:  int32(args.PrevLogTerm),
+		Entries:      entries,
 		LeaderCommit: int32(args.LeaderCommit),
-		Entries:      make([]*pb.LogEntry, len(args.Entries)),
 	}
 
-	for i, entry := range args.Entries {
-		req.Entries[i] = &pb.LogEntry{
-			Term:    int32(entry.Term),
-			Command: fmt.Sprintf("%v", entry.Command),
-		}
-	}
-
-	// Call RPC
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	resp, err := client.AppendEntries(ctx, req)
+	resp, err := rn.clients[i].AppendEntries(context.Background(), req)
 	if err != nil {
 		return false
 	}
 
-	// Convert resp -> reply
-	reply.Success = resp.Success
 	reply.Term = int(resp.Term)
+	reply.Success = resp.Success
 	return true
 }
 
 func (rn *RaftNode) sendRequestVote(peer string, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	// Placeholder for RPC call, returns true on success
-	// Replace with actual RPC call implementation
-	return false
+	i := rn.peerIndex(peer)
+	req := &pb.RequestVoteArgs{
+		Term:         int32(args.Term),
+		CandidateId:  int32(args.CandidateId),
+		LastLogIndex: int32(args.LastLogIndex),
+		LastLogTerm:  int32(args.LastLogTerm),
+	}
+
+	resp, err := rn.clients[i].RequestVote(context.Background(), req)
+	if err != nil {
+		return false
+	}
+
+	reply.Term = int(resp.Term)
+	reply.VoteGranted = resp.VoteGranted
+	return true
 }
 
 func (rn *RaftNode) HandleRequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
@@ -381,7 +404,10 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs, reply *AppendEn
 		return
 	}
 
-	rn.heartbeatCh <- true
+	select {
+	case rn.heartbeatCh <- true:
+	default:
+	}
 
 	if args.Term > rn.currentTerm {
 		rn.currentTerm = args.Term
@@ -389,7 +415,7 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs, reply *AppendEn
 		rn.state = Follower
 	}
 
-	if args.PrevLogIndex >= len(rn.log) || (args.PrevLogIndex > 0 && rn.log[args.PrevLogIndex].Term != args.PrevLogIndex) {
+	if args.PrevLogIndex >= len(rn.log) || (args.PrevLogIndex > 0 && rn.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
 		reply.Term = rn.currentTerm
 		reply.Success = false
 		return

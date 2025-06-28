@@ -27,14 +27,55 @@ func (rs *RaftService) StartCommand(ctx context.Context, req *pb.StartCommandReq
 	}, nil
 }
 
+func (rs *RaftService) RequestVote(ctx context.Context, req *pb.RequestVoteArgs) (*pb.RequestVoteReply, error) {
+	args := &raft.RequestVoteArgs{
+		Term:         int(req.Term),
+		CandidateId:  int(req.CandidateId),
+		LastLogIndex: int(req.LastLogIndex),
+		LastLogTerm:  int(req.LastLogTerm),
+	}
+	reply := &raft.RequestVoteReply{}
+	rs.raftNode.HandleRequestVote(args, reply)
+	return &pb.RequestVoteReply{
+		Term:        int32(reply.Term),
+		VoteGranted: reply.VoteGranted,
+	}, nil
+}
+
+func (rs *RaftService) AppendEntries(ctx context.Context, req *pb.AppendEntriesArgs) (*pb.AppendEntriesReply, error) {
+	entries := make([]raft.LogEntry, len(req.Entries))
+	for i, e := range req.Entries {
+		entries[i] = raft.LogEntry{
+			Term:    int(e.Term),
+			Command: e.Command,
+		}
+	}
+
+	args := &raft.AppendEntriesArgs{
+		Term:         int(req.Term),
+		LeaderId:     int(req.LeaderId),
+		PrevLogIndex: int(req.PrevLogIndex),
+		PrevLogTerm:  int(req.PrevLogTerm),
+		Entries:      entries,
+		LeaderCommit: int(req.LeaderCommit),
+	}
+	reply := &raft.AppendEntriesReply{}
+	rs.raftNode.HandleAppendEntries(args, reply)
+	return &pb.AppendEntriesReply{
+		Term:    int32(reply.Term),
+		Success: reply.Success,
+	}, nil
+}
+
 func main() {
 	id := flag.Int("id", 0, "Node ID (index into peers list)")
 	port := flag.Int("port", 50051, "Port to listen on")
 	flag.Parse()
 
 	peers := []string{
-		"localhost:50051",
-		"localhost:50052",
+		"node0:50051",
+		"node1:50052",
+		"node2:50053",
 	}
 
 	if *id < 0 || *id >= len(peers) {
